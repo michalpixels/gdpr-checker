@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+# Tell Puppeteer to use the system Chrome
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+
 # Create app directory
 WORKDIR /usr/src/app
 
@@ -24,8 +27,7 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci --only=production
 
-# Create public directory and copy files
-RUN mkdir -p public
+# Copy app source
 COPY server.js ./
 COPY public/ ./public/
 
