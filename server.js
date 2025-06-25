@@ -171,7 +171,24 @@ class GDPRChecker {
         throw new Error('Only HTTP and HTTPS URLs are supported');
       }
 
-      const browser = await this.initBrowser();
+      const browser = await puppeteer.launch({
+        headless: 'new',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor',
+          '--disable-extensions',
+          '--disable-plugins',
+          '--disable-default-apps',
+          '--single-process',
+          '--no-zygote'
+        ],
+        timeout: 60000
+      });
+
       page = await browser.newPage();
       
       this.log('Page created, setting up...');
@@ -363,6 +380,7 @@ class GDPRChecker {
           throw new Error('Page is closed unexpectedly');
         }
       }
+      await browser.close();
       return results;
 
     } catch (error) {
