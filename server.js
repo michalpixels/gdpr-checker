@@ -389,10 +389,13 @@ class GDPRChecker {
       // Clean up page if it exists
       if (page) {
         try {
-          if (page && !page.isClosed()) {
-            if (!page || page.isClosed()) {
-              throw new Error('Page is closed unexpectedly');
+          try {
+            if (page && !page.isClosed()) {
+              await page.close();
+              this.log('Page closed successfully');
             }
+          } catch (closeError) {
+            this.log('Error closing page:', closeError.message);
           }
         } catch (closeError) {
           this.log('Error closing page:', closeError.message);
