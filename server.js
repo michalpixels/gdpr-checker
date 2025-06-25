@@ -160,18 +160,19 @@ class GDPRChecker {
   }
 
   async checkUrl(url, retryCount = 0) {
+    let browser = null;
     let page = null;
-    
+
     try {
       this.log(`Starting URL check: ${url} (attempt ${retryCount + 1})`);
-      
-      // Validate URL format
+
       const urlObj = new URL(url);
       if (!['http:', 'https:'].includes(urlObj.protocol)) {
         throw new Error('Only HTTP and HTTPS URLs are supported');
       }
 
-      const browser = await puppeteer.launch({
+      // 🚀 Launch fresh browser per check
+      browser = await puppeteer.launch({
         headless: 'new',
         args: [
           '--no-sandbox',
@@ -190,85 +191,51 @@ class GDPRChecker {
       });
 
       page = await browser.newPage();
-      
-      this.log('Page created, setting up...');
-      
-      // Set reasonable timeouts and limits
+
       await page.setDefaultNavigationTimeout(60000);
       await page.setDefaultTimeout(30000);
-      
-      // Set user agent and viewport
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       await page.setViewport({ width: 1366, height: 768 });
 
-      // Track network requests for tracking services
       const networkRequests = [];
       const cookies = [];
-      
-      this.log('Setting up request interception...');
-      
-      // Simplified request monitoring - no interception to avoid issues
+
       page.on('request', (req) => {
-        const requestUrl = req.url();
         networkRequests.push({
-          url: requestUrl,
+          url: req.url(),
           type: req.resourceType(),
           timestamp: Date.now()
         });
       });
 
-      // Monitor cookie changes
-      page.on('response', async (response) => {
+      page.on('response', async (res) => {
         try {
-          const setCookieHeader = response.headers()['set-cookie'];
+          const setCookieHeader = res.headers()['set-cookie'];
           if (setCookieHeader) {
             cookies.push({
-              url: response.url(),
+              url: res.url(),
               cookies: setCookieHeader,
               timestamp: Date.now()
             });
           }
-        } catch (error) {
-          // Ignore errors in response handling
-        }
+        } catch {}
       });
 
       const startTime = Date.now();
       this.log('Navigating to URL...');
-
-      // Navigate to the page with simplified approach
-      let response;
-      try {
-        response = await page.goto(url, { 
-          waitUntil: 'domcontentloaded',
-          timeout: 60000 
-        });
-        this.log('Page loaded successfully');
-      } catch (error) {
-        this.log('Navigation error:', error.message);
-        throw error;
-      }
-
-      // Check response
-      if (!response) {
-        throw new Error('No response received from the page');
-      }
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      if (!response) throw new Error('No response received from the page');
 
       const status = response.status();
       this.log(`Response status: ${status}`);
-      
-      if (status >= 400) {
-        throw new Error(`HTTP ${status}: ${response.statusText()}`);
-      }
+      if (status >= 400) throw new Error(`HTTP ${status}: ${response.statusText()}`);
 
       const afterLoadTime = Date.now();
       this.log(`Page loaded in ${afterLoadTime - startTime}ms`);
 
-      // Wait for dynamic content
       this.log('Waiting for dynamic content...');
       await this.waitForDelay(page, 3000);
 
-      // Initialize results object
       const results = {
         url,
         timestamp: new Date().toISOString(),
@@ -282,134 +249,54 @@ class GDPRChecker {
         }
       };
 
-      this.log('Getting page content...');
-      // Get HTML content
       const content = await page.content();
       const $ = cheerio.load(content);
-      
-      this.log(`Content loaded, length: ${content.length} characters`);
-
-      // Get cookies set before consent
       const preConsentCookies = await page.cookies();
-      this.log(`Found ${preConsentCookies.length} cookies`);
 
-      // Perform all checks with error handling
       this.log('Running cookie banner check...');
-      try {
-        results.checks.cookieBanner = await this.checkCookieBanner(page, $);
-        this.log('Cookie banner check completed', results.checks.cookieBanner);
-      } catch (error) {
-        this.log('Cookie banner check failed:', error.message);
-        results.checks.cookieBanner = { found: false, score: 0, error: error.message };
-      }
+      results.checks.cookieBanner = await this.checkCookieBanner(page, $);
 
       this.log('Running privacy policy check...');
-      try {
-        results.checks.privacyPolicy = await this.checkPrivacyPolicy(page, $);
-        this.log('Privacy policy check completed', results.checks.privacyPolicy);
-      } catch (error) {
-        this.log('Privacy policy check failed:', error.message);
-        results.checks.privacyPolicy = { found: false, score: 0, error: error.message };
-      }
+      results.checks.privacyPolicy = await this.checkPrivacyPolicy(page, $);
 
       this.log('Running cookie policy check...');
-      try {
-        results.checks.cookiePolicy = await this.checkCookiePolicy(page, $);
-        this.log('Cookie policy check completed', results.checks.cookiePolicy);
-      } catch (error) {
-        this.log('Cookie policy check failed:', error.message);
-        results.checks.cookiePolicy = { found: false, score: 0, error: error.message };
-      }
+      results.checks.cookiePolicy = await this.checkCookiePolicy(page, $);
 
       this.log('Running contact info check...');
-      try {
-        results.checks.contactInfo = await this.checkContactInfo(page, $);
-        this.log('Contact info check completed', results.checks.contactInfo);
-      } catch (error) {
-        this.log('Contact info check failed:', error.message);
-        results.checks.contactInfo = { found: false, score: 0, error: error.message };
-      }
+      results.checks.contactInfo = await this.checkContactInfo(page, $);
 
       this.log('Running SSL check...');
-      try {
-        results.checks.ssl = await this.checkSSL(url);
-        this.log('SSL check completed', results.checks.ssl);
-      } catch (error) {
-        this.log('SSL check failed:', error.message);
-        results.checks.ssl = { valid: false, details: error.message };
-      }
+      results.checks.ssl = await this.checkSSL(url);
 
       this.log('Running cookies check...');
-      try {
-        results.checks.cookies = await this.checkCookies(page);
-        this.log('Cookies check completed', results.checks.cookies);
-      } catch (error) {
-        this.log('Cookies check failed:', error.message);
-        results.checks.cookies = { count: 0, score: 0, error: error.message };
-      }
-      
-      this.log('Running pre-consent violations check...');
-      try {
-        results.checks.preConsentViolations = await this.checkPreConsentViolations(
-          preConsentCookies, 
-          networkRequests, 
-          content,
-          startTime,
-          afterLoadTime
-        );
-        this.log('Pre-consent violations check completed', results.checks.preConsentViolations);
-        // ✅ Pridaj túto líniu:
-        results.thirdPartyServices = results.checks?.preConsentViolations?.trackingServices || [];
-      } catch (error) {
-        this.log('Pre-consent violations check failed:', error.message);
-        results.checks.preConsentViolations = { found: false, score: 50, error: error.message };
-      }
+      results.checks.cookies = await this.checkCookies(page);
 
-      // Calculate score and recommendations
+      this.log('Running pre-consent violations check...');
+      results.checks.preConsentViolations = await this.checkPreConsentViolations(
+        preConsentCookies, networkRequests, content, startTime, afterLoadTime
+      );
+
+      results.thirdPartyServices = results.checks?.preConsentViolations?.trackingServices || [];
+
       this.log('Calculating final score...');
       results.score = this.calculateScore(results.checks);
       results.recommendations = this.generateRecommendations(results.checks);
 
-      this.log(`Final results:`, {
+      this.log('Final results:', {
         score: results.score,
         recommendationsCount: results.recommendations.length
       });
 
-      if (page && !page.isClosed()) {
-        if (!page || page.isClosed()) {
-          throw new Error('Page is closed unexpectedly');
-        }
-      }
-      await browser.close();
       return results;
-
     } catch (error) {
       this.log(`Error checking URL (attempt ${retryCount + 1}):`, error.message);
-      
-      // Clean up page if it exists
-      if (page) {
-        try {
-          try {
-            if (page && !page.isClosed()) {
-              await page.close();
-              this.log('Page closed successfully');
-            }
-          } catch (closeError) {
-            this.log('Error closing page:', closeError.message);
-          }
-        } catch (closeError) {
-          this.log('Error closing page:', closeError.message);
-        }
-      }
-      
-      // Retry logic
+
       if (retryCount < this.maxRetries) {
         this.log(`Retrying... (${retryCount + 1}/${this.maxRetries})`);
-        await this.delay(3000 * (retryCount + 1)); // Exponential backoff
+        await this.delay(3000 * (retryCount + 1));
         return this.checkUrl(url, retryCount + 1);
       }
-      
-      // Return error result instead of throwing
+
       return {
         url,
         timestamp: new Date().toISOString(),
@@ -426,6 +313,24 @@ class GDPRChecker {
           error: error.message
         }
       };
+    } finally {
+      try {
+        if (page && !page.isClosed()) {
+          await page.close();
+          this.log('Page closed successfully');
+        }
+      } catch (err) {
+        this.log('Error closing page:', err.message);
+      }
+
+      try {
+        if (browser) {
+          await browser.close();
+          this.log('Browser closed successfully');
+        }
+      } catch (err) {
+        this.log('Error closing browser:', err.message);
+      }
     }
   }
 
