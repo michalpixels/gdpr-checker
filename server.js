@@ -381,23 +381,10 @@ class GDPRChecker {
       }
       
       // Retry logic
-      async checkUrl(url) {
-        let retryCount = 0;
-        while (retryCount <= this.maxRetries) {
-          try {
-            // All your logic here (move it into this block)
-            return results;
-          } catch (error) {
-            this.log(`Error checking URL (attempt ${retryCount + 1}):`, error.message);
-            retryCount++;
-
-            if (retryCount > this.maxRetries) {
-              return { error: error.message, score: 0, ... };
-            }
-
-            await this.delay(3000 * retryCount); // Exponential backoff
-          }
-        }
+      if (retryCount < this.maxRetries) {
+        this.log(`Retrying... (${retryCount + 1}/${this.maxRetries})`);
+        await this.delay(3000 * (retryCount + 1)); // Exponential backoff
+        return this.checkUrl(url, retryCount + 1);
       }
       
       // Return error result instead of throwing
