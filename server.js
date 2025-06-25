@@ -139,7 +139,8 @@ class GDPRChecker {
             '--no-zygote'
           ],
           timeout: 60000, // Increased timeout
-          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+          // REMOVE THIS LINE or ensure it's undefined:
+          // executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         });
         this.log('Browser initialized successfully');
       } catch (error) {
