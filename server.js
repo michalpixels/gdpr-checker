@@ -357,7 +357,11 @@ class GDPRChecker {
         recommendationsCount: results.recommendations.length
       });
 
-      await page.close();
+      if (page && !page.isClosed()) {
+        if (!page || page.isClosed()) {
+          throw new Error('Page is closed unexpectedly');
+        }
+      }
       return results;
 
     } catch (error) {
@@ -366,17 +370,34 @@ class GDPRChecker {
       // Clean up page if it exists
       if (page) {
         try {
-          await page.close();
+          if (page && !page.isClosed()) {
+            if (!page || page.isClosed()) {
+              throw new Error('Page is closed unexpectedly');
+            }
+          }
         } catch (closeError) {
           this.log('Error closing page:', closeError.message);
         }
       }
       
       // Retry logic
-      if (retryCount < this.maxRetries) {
-        this.log(`Retrying... (${retryCount + 1}/${this.maxRetries})`);
-        await this.delay(3000 * (retryCount + 1)); // Exponential backoff
-        return this.checkUrl(url, retryCount + 1);
+      async checkUrl(url) {
+        let retryCount = 0;
+        while (retryCount <= this.maxRetries) {
+          try {
+            // All your logic here (move it into this block)
+            return results;
+          } catch (error) {
+            this.log(`Error checking URL (attempt ${retryCount + 1}):`, error.message);
+            retryCount++;
+
+            if (retryCount > this.maxRetries) {
+              return { error: error.message, score: 0, ... };
+            }
+
+            await this.delay(3000 * retryCount); // Exponential backoff
+          }
+        }
       }
       
       // Return error result instead of throwing
@@ -418,12 +439,12 @@ class GDPRChecker {
           'lang', 'language', 'timezone', 'currency', 'theme', 'wordpress',
           'wp-', 'phpsessid'
         ];
-        
-        const cookieName = cookie.name.toLowerCase();
+
+        const cookieName = (cookie.name || '').toLowerCase();
         const isEssential = essentialPatterns.some(pattern => 
           cookieName.includes(pattern.toLowerCase())
         );
-        
+
         return !isEssential;
       });
 
@@ -882,7 +903,7 @@ app.post('/api/check', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[API] Unhandled error:', error);
+    console.error('[API] Unhandled error:', error.stack || error);
     
     const errorResponse = {
       success: false,
